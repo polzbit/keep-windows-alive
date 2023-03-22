@@ -30,6 +30,14 @@ and run the following command:
 pyinstaller --noconsole --onefile ./KeepAlive/__init__.py --demo
 ```
 
+## Tests
+
+run tests using:
+
+```bash
+python -m unittest tests
+```
+
 ## License
 
 This project is licensed under the MIT License.
