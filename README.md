@@ -27,7 +27,7 @@ pip install PyInstaller
 and run the following command:
 
 ```bash
-pyinstaller --noconsole --onefile ./KeepAlive/__init__.py --demo
+pyinstaller --noconsole --onefile ./KeepAlive/__init__.py --name demo
 ```
 
 ## Tests
