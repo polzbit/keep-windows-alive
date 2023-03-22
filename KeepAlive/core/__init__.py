@@ -1,5 +1,6 @@
+from PyQt5.QtCore import QThread
 from KeepAlive.core.volume import increase_volume, decrease_volume
-from PyQt5.QtCore import QThread, QEventLoop, QTimer
+from KeepAlive.core.sleep import sleep
 
 class KeepAliveThread(QThread):
     def __init__(self,parent=None):
@@ -9,13 +10,9 @@ class KeepAliveThread(QThread):
     def run(self):
         while(self.threadActive):
             increase_volume()
-            loop = QEventLoop()
-            QTimer.singleShot(1000, loop.quit)
-            loop.exec_()
+            sleep(1)
             decrease_volume()
-            loop = QEventLoop()
-            QTimer.singleShot(300000, loop.quit)
-            loop.exec_()
+            sleep(300)
 
     def stop(self):
         self.threadActive = False

@@ -1,4 +1,3 @@
-
 from PyQt5.QtWidgets import QApplication
 from KeepAlive.windows.MainWindow import MainWindow
 
