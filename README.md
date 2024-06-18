@@ -4,7 +4,12 @@ Simple python GUI app to prevent windows from entering sleep mode. it does so by
 
 ## Features
 
+<<<<<<< HEAD
 - Trick windows to stay active.
+=======
+- Trick windows to never sleep.
+- Minimize to system tray.
+>>>>>>> 20d96a53bfeaf7457db87833fd15797d229c4ea6
 - UI interface using PyQt5 package.
 - Windows volume control using PyWin32 package.
 
