@@ -5,7 +5,7 @@ from datetime import datetime
 class TimeSheetDb:
     def __init__(self):
         self.con = QSqlDatabase.addDatabase("QSQLITE")
-        self.con.setDatabaseName(".\\KeepAlive\\db\\AppDb")
+        self.con.setDatabaseName(".\\AppDb")
     
     def lastError(self):
         return self.con.lastError()
