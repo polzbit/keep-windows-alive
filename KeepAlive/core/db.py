@@ -1,21 +1,32 @@
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery
 import pandas as pd
 from datetime import datetime
-
+from sys import exit as sysExit
 class TimeSheetDb:
     def __init__(self):
         self.con = QSqlDatabase.addDatabase("QSQLITE")
+        if not self.con.open():
+            print("Database Error: %s" % self.con.lastError().databaseText())
+            sysExit(0)
         self.con.setDatabaseName(".\\AppDb")
     
     def lastError(self):
         return self.con.lastError()
     
     def isConnectionOpen(self):
-        return self.con.open()
+        return self.con and self.con.open()
+    
+    def closeConnection(self):
+        self.con.close()
+        del self.con
+        self.con = None
+        QSqlDatabase.removeDatabase("QSQLITE")
+        sysExit(0)
     
     def clearTimeSheetTable(self):
         query = QSqlQuery()
         query.exec('delete from timeSheet')
+        query.finish()
     
     def getTimeSheet(self, date = pd.to_datetime(datetime.now()), byDay = False):
         query = QSqlQuery()
@@ -37,8 +48,8 @@ class TimeSheetDb:
         return data
     
     def createTable(self):
-        createTableQuery = QSqlQuery()
-        createTableQuery.exec(
+        query = QSqlQuery()
+        query.exec(
             """
             CREATE TABLE timeSheet (
                 id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE NOT NULL,
@@ -48,8 +59,9 @@ class TimeSheetDb:
             )
             """
         )
+        query.finish()
     
-    def createTimestamp(self,runtime, end):
+    def createTimestamp(self, runtime, end):
         date = pd.to_datetime(datetime.now())
         query = QSqlQuery()
         data = self.getTimeSheet(date, True)
@@ -58,14 +70,21 @@ class TimeSheetDb:
                 f"""INSERT INTO timeSheet (start)
                 VALUES ('{date}')"""
             )
+            query.finish()
         elif end and len(data):
             runtime_dur = runtime.split(':')
             dur = data[0][3].split(':')
-            dur_hours = int(dur[0]) * 3600
-            dur_minutes = int(dur[1]) * 60
+            if len(dur) > 1:
+                dur_hours = int(dur[0]) * 3600
+                dur_minutes = int(dur[1]) * 60
+                dur_seconds = int(dur[2])
+            else:
+                dur_hours = 0
+                dur_minutes = 0
+                dur_seconds = 0
             runtime_hours = int(runtime_dur[0]) * 3600
             runtime_minutes = int(runtime_dur[1]) * 60
-            total_seconds = runtime_hours + runtime_minutes + int(runtime_dur[2]) + dur_hours + dur_minutes + int(dur[2])
+            total_seconds = runtime_hours + runtime_minutes + int(runtime_dur[2]) + dur_hours + dur_minutes + dur_seconds
             sec = total_seconds
             hour = sec // 3600
             sec %= 3600
@@ -74,3 +93,4 @@ class TimeSheetDb:
             query.exec_(
                 f"""UPDATE timeSheet SET end = '{date}', duration = '{"%02d:%02d:%02d" % (hour, min, sec)}' WHERE id = {data[0][0]}"""
             )
+            query.finish()

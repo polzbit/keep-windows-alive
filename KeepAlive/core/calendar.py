@@ -18,8 +18,11 @@ def is_weekday(day, timeSheet):
     currentRecord = None
     for i in range(len(timeSheet)):
         start = pd.to_datetime(timeSheet[i][1], dayfirst=False)
-        end = pd.to_datetime(timeSheet[i][2], dayfirst=False)
+        if timeSheet[i][2] != '':
+            end = pd.to_datetime(timeSheet[i][2], dayfirst=False).strftime('%X')
+        else:
+            end = ''
         if start.date() == date.date():
-            currentRecord = (timeSheet[i][0], start.strftime('%X'), end.strftime('%X'), timeSheet[i][3])
+            currentRecord = (timeSheet[i][0], start.strftime('%X'), end, timeSheet[i][3])
             break
     return (name, weekday < 4 or weekday > 5, currentRecord)

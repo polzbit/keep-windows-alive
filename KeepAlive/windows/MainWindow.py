@@ -6,17 +6,18 @@ from KeepAlive.style.palette import palette
 from KeepAlive.core.calendar import get_current_days, is_weekday, get_month_list
 from KeepAlive.widgets.TableWidget import TableWidget
 import pandas as pd
-
+from KeepAlive.core.db import TimeSheetDb
+from time import sleep
 class MainWindow(QMainWindow):
     table_headers = ['Date', 'Start', 'End', 'Duration']
     month_list = get_month_list()
-    def __init__(self, db):
+    def __init__(self):
         QMainWindow.__init__(self)
+        self.db = TimeSheetDb()
         self.start_text = 'Start'
         self.runtime = '00:00:00'
         self.icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
-        self.timeSheet = db.getTimeSheet()
-        self.db = db
+        self.timeSheet = self.db.getTimeSheet()
         self.keepAliveProcess = None
         self.shouldUpdate = True
         self.time = 0
@@ -138,7 +139,10 @@ class MainWindow(QMainWindow):
 
     def set_timeSheet_year(self, newYear):
         monthNumber = self.month_list.index(self.monthSelect.currentText()) + 1
-        self.render_table(pd.to_datetime(f"{newYear}/{monthNumber}/1"))
+        if monthNumber > 12:
+            monthNumber = 1
+        if newYear:
+            self.render_table(pd.to_datetime(f"{newYear}/{monthNumber}/1"))
 
     def set_timeSheet_month(self, newMonth):
         monthNumber = self.month_list.index(newMonth) + 1
@@ -148,6 +152,8 @@ class MainWindow(QMainWindow):
         self.shouldUpdate = checked
     
     def render_table(self, date = None):
+        if not self.db.isConnectionOpen():
+            return
         if date != None:
             self.timeSheet = self.db.getTimeSheet(date)
             self.calendarData = get_current_days(date)
@@ -281,8 +287,12 @@ class MainWindow(QMainWindow):
 
     def quitEvent(self):
         if self.keepAliveProcess != None and self.keepAliveProcess.is_alive():
+            self.toggleKeepAliveProcess()
             self.keepAliveProcess.stop()
+        if self.ipThread != None and self.ipThread.is_alive():
+            self.ipThread.stop()
         qApp.quit()
+        self.db.closeConnection()  
 
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
