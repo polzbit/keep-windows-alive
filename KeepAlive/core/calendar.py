@@ -9,7 +9,7 @@ def get_month_list():
 
 def get_current_days(current_date = datetime.now()):
     date = pd.to_datetime(current_date)
-    return (current_date.year, current_date.month, date.month_name(), monthrange(current_date.year, current_date.month)[1])
+    return (current_date.year, current_date.month, date.month_name(), monthrange(current_date.year, current_date.month)[1], date.day)
 
 def is_weekday(day, timeSheet):
     date = pd.to_datetime(day, dayfirst=True)
@@ -26,3 +26,10 @@ def is_weekday(day, timeSheet):
             currentRecord = (timeSheet[i][0], start.strftime('%X'), end, timeSheet[i][3])
             break
     return (name, weekday < 4 or weekday > 5, currentRecord)
+
+def get_runtime_time(runtime):
+    runtime_dur = runtime.split(':')
+    runtime_hours = int(runtime_dur[0]) * 3600
+    runtime_minutes = int(runtime_dur[1]) * 60
+    total_seconds = runtime_hours + runtime_minutes + int(runtime_dur[2])
+    return total_seconds

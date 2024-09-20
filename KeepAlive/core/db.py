@@ -2,6 +2,7 @@ from PyQt5.QtSql import QSqlDatabase, QSqlQuery
 import pandas as pd
 from datetime import datetime
 from sys import exit as sysExit
+from .calendar import get_runtime_time
 class TimeSheetDb:
     def __init__(self):
         self.con = QSqlDatabase.addDatabase("QSQLITE")
@@ -72,19 +73,7 @@ class TimeSheetDb:
             )
             query.finish()
         elif end and len(data):
-            runtime_dur = runtime.split(':')
-            dur = data[0][3].split(':')
-            if len(dur) > 1:
-                dur_hours = int(dur[0]) * 3600
-                dur_minutes = int(dur[1]) * 60
-                dur_seconds = int(dur[2])
-            else:
-                dur_hours = 0
-                dur_minutes = 0
-                dur_seconds = 0
-            runtime_hours = int(runtime_dur[0]) * 3600
-            runtime_minutes = int(runtime_dur[1]) * 60
-            total_seconds = runtime_hours + runtime_minutes + int(runtime_dur[2]) + dur_hours + dur_minutes + dur_seconds
+            total_seconds = get_runtime_time(runtime)
             sec = total_seconds
             hour = sec // 3600
             sec %= 3600

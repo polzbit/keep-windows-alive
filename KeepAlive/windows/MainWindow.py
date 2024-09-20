@@ -3,11 +3,13 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QIcon, QColor
 from KeepAlive.core import KeepAliveThread, GetPublicIpThread
 from KeepAlive.style.palette import palette
-from KeepAlive.core.calendar import get_current_days, is_weekday, get_month_list
+from KeepAlive.core.calendar import get_current_days, is_weekday, get_month_list, get_runtime_time
 from KeepAlive.widgets.TableWidget import TableWidget
+from KeepAlive.widgets.SwitchWidget import SwitchWidget
 import pandas as pd
 from KeepAlive.core.db import TimeSheetDb
 from time import sleep
+
 class MainWindow(QMainWindow):
     table_headers = ['Date', 'Start', 'End', 'Duration']
     month_list = get_month_list()
@@ -19,7 +21,6 @@ class MainWindow(QMainWindow):
         self.icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
         self.timeSheet = self.db.getTimeSheet()
         self.keepAliveProcess = None
-        self.shouldUpdate = True
         self.time = 0
         self.calendarData = (0, 0, '', 0)
         self.setWindowIcon(self.icon)
@@ -80,6 +81,16 @@ class MainWindow(QMainWindow):
         
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.showTime)
+
+        keep_alive_label = QLabel()
+        keep_alive_label.setText("Keep windows active")
+        keep_alive_label.setMinimumSize(200, 20)
+        keep_alive_label.setMaximumSize(200, 20)
+        keep_alive_label.setAlignment(Qt.AlignLeft)
+        keep_alive_label.setContentsMargins(0, 0, 0, 0)
+
+        self.keep_alive_button = SwitchWidget()
+        self.keep_alive_button.click.connect(self.on_should_keep_alive_change)
         
         self.time_label = QLabel()
         self.time_label.setText(self.runtime)
@@ -88,17 +99,6 @@ class MainWindow(QMainWindow):
         self.time_label.setMaximumSize(60, 20)
         self.time_label.setWordWrap(True)
         self.time_label.setContentsMargins(5, 5, 5, 5)
-
-        self.shouldUpdateCheckbox = QCheckBox()
-        self.shouldUpdateCheckbox.stateChanged.connect(self.on_should_update_change)
-        self.shouldUpdateCheckbox.setChecked(True)
-
-        shouldUpdateLabel = QLabel()
-        shouldUpdateLabel.setText("Should update")
-        shouldUpdateLabel.setMinimumSize(100, 20)
-        shouldUpdateLabel.setMaximumSize(100, 20)
-        shouldUpdateLabel.setAlignment(Qt.AlignLeft)
-        shouldUpdateLabel.setContentsMargins(0, 0, 0, 0)
 
         self.yearSelect = QComboBox() 
         
@@ -122,15 +122,17 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.start_button)
         controls_layout.addWidget(self.time_label)
         controls_layout.addWidget(quit_button)
+        ka_controls_layout = QHBoxLayout()
+        ka_controls_layout.addWidget(keep_alive_label)
+        ka_controls_layout.addWidget(self.keep_alive_button)
         bottom_layout = QHBoxLayout()
         bottom_layout.setAlignment(Qt.AlignLeft)
-        bottom_layout.addWidget(self.shouldUpdateCheckbox)
-        bottom_layout.addWidget(shouldUpdateLabel)
         table_controls_layout = QHBoxLayout()
         table_controls_layout.addWidget(self.yearSelect)
         table_controls_layout.addWidget(self.monthSelect)
         layout.addLayout(top_layout)
         layout.addLayout(controls_layout)
+        layout.addLayout(ka_controls_layout)
         layout.addLayout(bottom_layout)
         layout.addLayout(table_controls_layout)
         layout.addWidget(self.time_table)
@@ -147,21 +149,27 @@ class MainWindow(QMainWindow):
     def set_timeSheet_month(self, newMonth):
         monthNumber = self.month_list.index(newMonth) + 1
         self.render_table(pd.to_datetime(f"{self.yearSelect.currentText()}/{monthNumber}/1"))
-
-    def on_should_update_change(self, checked):
-        self.shouldUpdate = checked
     
+    def on_should_keep_alive_change(self):
+        if self.keepAliveProcess != None and self.keepAliveProcess.is_alive():
+            self.keepAliveProcess.stop()
+            self.statusBar().showMessage('')
+        else:
+            self.keepAliveProcess = KeepAliveThread()
+            self.keepAliveProcess.run()
+            self.statusBar().showMessage('Keep-Alive is now running.')
+
     def render_table(self, date = None):
         if not self.db.isConnectionOpen():
             return
         if date != None:
             self.timeSheet = self.db.getTimeSheet(date)
             self.calendarData = get_current_days(date)
-            (yearNumber, monthNumber, monthName, numOfDays) = self.calendarData
+            (yearNumber, monthNumber, monthName, numOfDays, day) = self.calendarData
         else:
             self.timeSheet = self.db.getTimeSheet()
             self.calendarData = get_current_days()
-            (yearNumber, monthNumber, monthName, numOfDays) = self.calendarData
+            (yearNumber, monthNumber, monthName, numOfDays, day) = self.calendarData
             def mapYears(variable):
                 date = pd.to_datetime(variable[1])
                 return date.year
@@ -202,6 +210,10 @@ class MainWindow(QMainWindow):
                 if column == 0: 
                     item = QTableWidgetItem(f"{row + 1}/{monthNumber}/{yearNumber} {dayName}")
                 if data != None:
+                    if row + 1 == day:
+                        self.runtime = data[3]
+                        self.time_label.setText(self.runtime)
+                        self.time = get_runtime_time(data[3])
                     if  column == 1:
                         item =  QTableWidgetItem(f"{data[1]}")
                     if data[2] != '' and column == 2:
@@ -243,25 +255,17 @@ class MainWindow(QMainWindow):
         self.hide()
 
     def toggleKeepAliveProcess(self):
-        if self.keepAliveProcess != None and self.keepAliveProcess.is_alive():
+        if self.start_button.text() == 'Stop':
             self.time_label.setText(self.runtime)
             self.start_button.setText('Start')
             self.start_action.setText('Start')
-            self.statusBar().showMessage('')
-            if self.shouldUpdate:
-                self.createTimestamp(True)
+            self.createTimestamp(True)
             self.timer.stop()
-            self.keepAliveProcess.stop()
         else:
-            self.time = 0
             self.start_button.setText('Stop')
             self.start_action.setText('Stop')
-            if self.shouldUpdate:
-                self.createTimestamp()
-            self.statusBar().showMessage('Keep-Alive is now running.')
-            self.keepAliveProcess = KeepAliveThread()
+            self.createTimestamp()
             self.timer.start(1000)
-            self.keepAliveProcess.run()
 
     @pyqtSlot(str)
     def showIp(self, ip):
