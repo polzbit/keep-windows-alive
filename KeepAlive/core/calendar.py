@@ -27,9 +27,17 @@ def is_weekday(day, timeSheet):
             break
     return (name, weekday < 4 or weekday > 5, currentRecord)
 
-def get_runtime_time(runtime):
+def get_runtime_seconds(runtime):
     runtime_dur = runtime.split(':')
     runtime_hours = int(runtime_dur[0]) * 3600
     runtime_minutes = int(runtime_dur[1]) * 60
     total_seconds = runtime_hours + runtime_minutes + int(runtime_dur[2])
     return total_seconds
+
+def get_runtime_text(runtime_seconds):
+    sec = runtime_seconds
+    hour = sec // 3600
+    sec %= 3600
+    min = sec // 60
+    sec %= 60
+    return "%02d:%02d:%02d" % (hour, min, sec)

@@ -2,7 +2,7 @@ from PyQt5.QtSql import QSqlDatabase, QSqlQuery
 import pandas as pd
 from datetime import datetime
 from sys import exit as sysExit
-from .calendar import get_runtime_time
+from .calendar import get_runtime_seconds
 class TimeSheetDb:
     def __init__(self):
         self.con = QSqlDatabase.addDatabase("QSQLITE")
@@ -73,13 +73,28 @@ class TimeSheetDb:
             )
             query.finish()
         elif end and len(data):
-            total_seconds = get_runtime_time(runtime)
-            sec = total_seconds
-            hour = sec // 3600
-            sec %= 3600
-            min = sec // 60
-            sec %= 60
             query.exec_(
-                f"""UPDATE timeSheet SET end = '{date}', duration = '{"%02d:%02d:%02d" % (hour, min, sec)}' WHERE id = {data[0][0]}"""
+                f"""UPDATE timeSheet SET end = '{date}', duration = '{runtime}' WHERE id = {data[0][0]}"""
             )
             query.finish()
+
+
+    def updateTimestamp(self, date, start, end, duration):
+        currentDate = pd.to_datetime(date)
+        startDate = pd.to_datetime(f"{currentDate.day}/{currentDate.month}/{currentDate.year} {start}")
+        endDate = pd.to_datetime(f"{currentDate.day}/{currentDate.month}/{currentDate.year} {end}")
+        query = QSqlQuery()
+        data = self.getTimeSheet(startDate, True)
+        if(not len(data)):
+            query.exec(
+                f"""INSERT INTO timeSheet (start, end, duration)
+                VALUES ('{startDate}','{endDate}', '{duration}')"""
+            )
+            query.finish()
+        else:
+            query.exec_(
+                f"""UPDATE timeSheet SET start = '{startDate}', end = '{endDate}', duration = '{duration}' WHERE id = {data[0][0]}"""
+            )
+            query.finish()
+        
+            

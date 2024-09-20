@@ -3,7 +3,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QIcon, QColor
 from KeepAlive.core import KeepAliveThread, GetPublicIpThread
 from KeepAlive.style.palette import palette
-from KeepAlive.core.calendar import get_current_days, is_weekday, get_month_list, get_runtime_time
+from KeepAlive.core.calendar import get_current_days, is_weekday, get_month_list, get_runtime_seconds, get_runtime_text
 from KeepAlive.widgets.TableWidget import TableWidget
 from KeepAlive.widgets.SwitchWidget import SwitchWidget
 import pandas as pd
@@ -11,7 +11,8 @@ from KeepAlive.core.db import TimeSheetDb
 from time import sleep
 
 class MainWindow(QMainWindow):
-    table_headers = ['Date', 'Start', 'End', 'Duration']
+    table_headers = ['Date', 'Start', 'End', 'Duration', '']
+    disabled_columns = [0,3,4]
     month_list = get_month_list()
     def __init__(self):
         QMainWindow.__init__(self)
@@ -105,6 +106,7 @@ class MainWindow(QMainWindow):
         self.monthSelect = QComboBox()      
 
         self.time_table = TableWidget(self.table_headers)
+        
         header = self.time_table.horizontalHeader()       
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -159,6 +161,34 @@ class MainWindow(QMainWindow):
             self.keepAliveProcess.run()
             self.statusBar().showMessage('Keep-Alive is now running.')
 
+    def on_table_cell_change(self, item):
+        itemText = item.text()
+        time = itemText.split(':')
+        if len(time) == 3:
+            itemRow = item.row()
+            itemColumn = item.column()
+            date = self.time_table.item(itemRow, 0).text()
+            startTime = self.time_table.item(itemRow, 1).text()
+            endTime = self.time_table.item(itemRow, 2).text()
+            duration = self.time_table.item(itemRow, 3).text()
+            if itemColumn == 1:
+                startTime = itemText
+            elif itemColumn == 2:
+                endTime = itemText
+            self.db.updateTimestamp(date, startTime, endTime, duration)
+            self.render_table()
+
+    def on_calculate_duration(self):
+        items = self.time_table.selectedItems()
+        if(len(items) == 2):
+            startTime = items[0].text()
+            endTime = items[1].text()
+            duration = get_runtime_seconds(endTime) - get_runtime_seconds(startTime)
+            duration_text = get_runtime_text(duration)
+            date = self.time_table.item(items[0].row(), 0).text()
+            self.db.updateTimestamp(date, startTime, endTime, duration_text)
+            self.render_table()
+
     def render_table(self, date = None):
         if not self.db.isConnectionOpen():
             return
@@ -197,12 +227,13 @@ class MainWindow(QMainWindow):
 
             self.yearSelect.currentTextChanged.connect(self.set_timeSheet_year)
             self.monthSelect.currentTextChanged.connect(self.set_timeSheet_month)
-
+        receiversCount = self.time_table.receivers(self.time_table.itemChanged) 
+        if receiversCount > 0:     
+            self.time_table.itemChanged.disconnect(self.on_table_cell_change)
         self.time_table._clear()
         self.time_table.setRowCount(numOfDays)  
         for i in range(len(self.table_headers)):
             self.time_table.setHorizontalHeaderItem(i, QTableWidgetItem(self.table_headers[i]))
-
         for row in range(numOfDays):
             (dayName, is_week_day, data) = is_weekday(f"{row+1}/{monthNumber}/{yearNumber}", self.timeSheet)
             for column in range(len(self.table_headers)):
@@ -213,17 +244,21 @@ class MainWindow(QMainWindow):
                     if row + 1 == day:
                         self.runtime = data[3]
                         self.time_label.setText(self.runtime)
-                        self.time = get_runtime_time(data[3])
-                    if  column == 1:
-                        item =  QTableWidgetItem(f"{data[1]}")
-                    if data[2] != '' and column == 2:
-                        item =  QTableWidgetItem(f"{data[2]}")
-                    if data[3] != '' and column == 3:
-                        item =  QTableWidgetItem(f"{data[3]}")
+                        self.time = get_runtime_seconds(data[3])
+                    if  column == 1 or column == 2 or column == 3:
+                        item =  QTableWidgetItem(f"{data[column]}")
                 if(not is_week_day):
-                    item.setBackground(QColor('#c0c0c0'))
-                item.setFlags(Qt.ItemIsEnabled)
-                self.time_table.setItem(row, column, item) 
+                    item.setBackground(QColor('#707070'))
+                if column in self.disabled_columns:
+                    item.setFlags(Qt.ItemIsEnabled)
+                if column == 4 and data != None and data[1] != '' and data[2] != '':
+                    btn = QPushButton()
+                    btn.setText('Calculate')
+                    btn.clicked.connect(self.on_calculate_duration)
+                    self.time_table.setCellWidget(row, column, btn)
+                else:
+                    self.time_table.setItem(row, column, item) 
+        self.time_table.itemChanged.connect(self.on_table_cell_change)
 
     def init_systemTray(self):
         self.tray_icon = QSystemTrayIcon(self)
