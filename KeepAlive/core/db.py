@@ -123,7 +123,8 @@ class TimeSheetDb:
         while query.next():
             data.append((query.value(id), query.value(name)))
         query.finish()
-        self.projectId = data[0][0]
+        if len(data):
+            self.projectId = data[0][0]
         return data
 
     def setProjectIdByName(self, name:str):
