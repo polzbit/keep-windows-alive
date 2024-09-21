@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import qApp, QWidget, QMainWindow, QStyle, QLabel, QCheckBox, QVBoxLayout, QHBoxLayout, QSystemTrayIcon, QAction, QMenu, QPushButton, QComboBox, QLineEdit, QTableWidgetItem, QHeaderView
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QIcon, QColor
 from KeepAlive.core import KeepAliveThread, GetPublicIpThread
 from KeepAlive.style.palette import palette
@@ -8,14 +8,18 @@ from KeepAlive.widgets.TableWidget import TableWidget
 from KeepAlive.widgets.SwitchWidget import SwitchWidget
 import pandas as pd
 from KeepAlive.core.db import TimeSheetDb
-from time import sleep
+from .NewProjectWindow import NewProjectWindow
 
 class MainWindow(QMainWindow):
+    createNewProject = pyqtSignal(str)
+    closeNewProjectWindow = pyqtSignal()
     table_headers = ['Date', 'Start', 'End', 'Duration', '']
-    disabled_columns = [0,3,4]
+    disabled_columns = [0, 3, 4]
     month_list = get_month_list()
     def __init__(self):
         QMainWindow.__init__(self)
+        self.createNewProject.connect(self.on_create_project)
+        self.closeNewProjectWindow.connect(self.close_new_project_window)
         self.db = TimeSheetDb()
         self.start_text = 'Start'
         self.runtime = '00:00:00'
@@ -24,14 +28,14 @@ class MainWindow(QMainWindow):
         self.keepAliveProcess = None
         self.time = 0
         self.calendarData = (0, 0, '', 0)
+        self.projectList = self.db.getProjects()
+        self.newProjectWindow = None
         self.setWindowIcon(self.icon)
         self.init_systemTray()
         self.initUI()
         self.ipThread = GetPublicIpThread()
         self.ipThread.finished.connect(self.showIp)
         self.ipThread.run()
-        # self.db.createTable()
-        # self.db.clearTimeSheetTable()
     
     def createTimestamp(self, end = False):
         self.db.createTimestamp(self.runtime, end)
@@ -101,11 +105,21 @@ class MainWindow(QMainWindow):
         self.time_label.setWordWrap(True)
         self.time_label.setContentsMargins(5, 5, 5, 5)
 
+        self.projectSelect = QComboBox() 
+        for project in self.projectList:
+            self.projectSelect.addItem(project[1])
+        self.projectSelect.currentTextChanged.connect(self.set_current_project)
+
         self.yearSelect = QComboBox() 
         
         self.monthSelect = QComboBox()      
 
+        self.yearSelect.currentTextChanged.connect(self.set_timeSheet_year)
+        self.monthSelect.currentTextChanged.connect(self.set_timeSheet_month)
+
         self.time_table = TableWidget(self.table_headers)
+        if not len(self.projectList):
+            self.time_table.hide()
         
         header = self.time_table.horizontalHeader()       
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -130,6 +144,7 @@ class MainWindow(QMainWindow):
         bottom_layout = QHBoxLayout()
         bottom_layout.setAlignment(Qt.AlignLeft)
         table_controls_layout = QHBoxLayout()
+        table_controls_layout.addWidget(self.projectSelect)
         table_controls_layout.addWidget(self.yearSelect)
         table_controls_layout.addWidget(self.monthSelect)
         layout.addLayout(top_layout)
@@ -139,7 +154,39 @@ class MainWindow(QMainWindow):
         layout.addLayout(table_controls_layout)
         layout.addWidget(self.time_table)
         self.central_widget.setLayout(layout)
+        self._createActions()
+        self._createMenuBar()
         self.show()
+
+    def _createMenuBar(self):
+        menuBar = self.menuBar()
+        # Creating menus using a title
+        fileMenu = menuBar.addMenu("&File")
+        fileMenu.addAction(self.newAction)
+        fileMenu.addAction(self.exitAction)
+        helpMenu = menuBar.addMenu("&Help")
+        helpMenu.addAction(self.aboutAction)
+
+    def _createActions(self):
+        self.newAction = QAction("&New Project", self)
+        self.newAction.triggered.connect(self.open_new_project_window)
+        self.exitAction = QAction("&Exit", self)
+        self.exitAction.triggered.connect(self.quitEvent)
+        self.aboutAction = QAction("&About", self)
+
+    def open_new_project_window(self):
+        self.newProjectWindow = NewProjectWindow(self)
+        self.newProjectWindow.show()
+
+    def close_new_project_window(self):
+        self.newProjectWindow.close()
+        self.newProjectWindow = None
+
+    def set_current_project(self, project):
+        self.db.setProjectIdByName(project)
+        self.time = 0
+        self.time_label.setText('00:00:00')
+        self.render_table()
 
     def set_timeSheet_year(self, newYear):
         monthNumber = self.month_list.index(self.monthSelect.currentText()) + 1
@@ -214,13 +261,17 @@ class MainWindow(QMainWindow):
             filteredYearList = list(filter(filterYears, list(map(mapYears ,self.timeSheet))))
             if(not len(filteredYearList)):
                 filteredYearList = [yearNumber]
+
+            self.yearSelect.currentTextChanged.disconnect(self.set_timeSheet_year)
+            self.monthSelect.currentTextChanged.disconnect(self.set_timeSheet_month)
             self.yearSelect.clear()
             self.yearSelect.addItem(str(filteredYearList[0] - 1))
             for year in filteredYearList:
                 self.yearSelect.addItem(str(year))
             self.yearSelect.addItem(str(filteredYearList[-1] + 1))
-            
             self.yearSelect.setCurrentText(str(yearNumber)) 
+
+            self.monthSelect.clear()
             for month in self.month_list:
                 self.monthSelect.addItem(month)
             self.monthSelect.setCurrentText(monthName) 
@@ -244,8 +295,9 @@ class MainWindow(QMainWindow):
                     if row + 1 == day:
                         self.runtime = data[3]
                         self.time_label.setText(self.runtime)
-                        self.time = get_runtime_seconds(data[3])
-                    if  column == 1 or column == 2 or column == 3:
+                        if data[3] != '':
+                            self.time = get_runtime_seconds(data[3])
+                    if column == 1 or column == 2 or column == 3:
                         item =  QTableWidgetItem(f"{data[column]}")
                 if(not is_week_day):
                     item.setBackground(QColor('#707070'))
@@ -306,13 +358,22 @@ class MainWindow(QMainWindow):
     def showIp(self, ip):
         self.public_ip_label.setText(ip)
 
+    @pyqtSlot(str)
+    def on_create_project(self, projectName):
+        self.db.createProject(projectName)
+        self.projectSelect.addItem(projectName)
+        if not len(self.projectList):
+            self.db.setProjectIdByName(projectName)
+            self.render_table()
+            self.time_table.show()
+        self.close_new_project_window()
+
     def refreshPublicIp(self):
         self.public_ip_label.setText('loading...')
         if(not self.ipThread.is_alive()):
             self.ipThread = GetPublicIpThread()
             self.ipThread.finished.connect(self.showIp)
             self.ipThread.run()
-
 
     def showTime(self):
         self.time += 1

@@ -2,14 +2,23 @@ from PyQt5.QtSql import QSqlDatabase, QSqlQuery
 import pandas as pd
 from datetime import datetime
 from sys import exit as sysExit
-from .calendar import get_runtime_seconds
+from os import path 
+
 class TimeSheetDb:
     def __init__(self):
+        self.projectId = None
         self.con = QSqlDatabase.addDatabase("QSQLITE")
+        if not path.isfile(".\\db.sqlite3"):
+            self.openConnection()
+            self.createTables()
+        else:
+            self.openConnection()
+    
+    def openConnection(self):
+        self.con.setDatabaseName(".\\db.sqlite3")
         if not self.con.open():
             print("Database Error: %s" % self.con.lastError().databaseText())
             sysExit(0)
-        self.con.setDatabaseName(".\\AppDb")
     
     def lastError(self):
         return self.con.lastError()
@@ -29,7 +38,7 @@ class TimeSheetDb:
         query.exec('delete from timeSheet')
         query.finish()
     
-    def getTimeSheet(self, date = pd.to_datetime(datetime.now()), byDay = False):
+    def getTimeSheet(self, date: pd.Timestamp = pd.to_datetime(datetime.now()), byDay = False):
         query = QSqlQuery()
         monthText = f'0{date.month}'
         dayText = f'0{date.day}'
@@ -38,9 +47,9 @@ class TimeSheetDb:
         if(date.day > 9):
             dayText = f'{date.day}'
         if(byDay):
-            query.exec(f"SELECT id, start, end, duration FROM timeSheet WHERE strftime('%m', start) = '{monthText}' AND strftime('%Y', start) = '{date.year}' AND strftime('%d', start) = '{dayText}'") 
+            query.exec(f"SELECT id, start, end, duration FROM timeSheet WHERE project_id = {self.projectId} AND strftime('%m', start) = '{monthText}' AND strftime('%Y', start) = '{date.year}' AND strftime('%d', start) = '{dayText}'") 
         else:
-            query.exec(f"SELECT id, start, end, duration FROM timeSheet WHERE strftime('%m', start) = '{monthText}' AND strftime('%Y', start) = '{date.year}'")
+            query.exec(f"SELECT id, start, end, duration FROM timeSheet WHERE project_id = {self.projectId} AND strftime('%m', start) = '{monthText}' AND strftime('%Y', start) = '{date.year}'")
         id, start, end, duration = range(4)
         data = []
         while query.next():
@@ -48,7 +57,7 @@ class TimeSheetDb:
         query.finish()
         return data
     
-    def createTable(self):
+    def createTables(self):
         query = QSqlQuery()
         query.exec(
             """
@@ -56,7 +65,16 @@ class TimeSheetDb:
                 id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE NOT NULL,
                 start TIMESTAMP NOT NULL,
                 end TIMESTAMP,
-                duration VARCHAR(40)
+                duration VARCHAR(40),
+                project_id INTEGER
+            )
+            """
+        )
+        query.exec(
+            """
+            CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE NOT NULL,
+                name VARCHAR(140)
             )
             """
         )
@@ -68,8 +86,8 @@ class TimeSheetDb:
         data = self.getTimeSheet(date, True)
         if(not end and not len(data)):
             query.exec(
-                f"""INSERT INTO timeSheet (start)
-                VALUES ('{date}')"""
+                f"""INSERT INTO timeSheet (start, project_id)
+                VALUES ('{date}', {self.projectId})"""
             )
             query.finish()
         elif end and len(data):
@@ -80,15 +98,15 @@ class TimeSheetDb:
 
 
     def updateTimestamp(self, date, start, end, duration):
-        currentDate = pd.to_datetime(date)
-        startDate = pd.to_datetime(f"{currentDate.day}/{currentDate.month}/{currentDate.year} {start}")
-        endDate = pd.to_datetime(f"{currentDate.day}/{currentDate.month}/{currentDate.year} {end}")
+        currentDate = pd.to_datetime(date, dayfirst=True)
+        startDate = pd.to_datetime(f"{currentDate.year}/{currentDate.month}/{currentDate.day} {start}")
+        endDate = pd.to_datetime(f"{currentDate.year}/{currentDate.month}/{currentDate.day} {end}")
         query = QSqlQuery()
         data = self.getTimeSheet(startDate, True)
         if(not len(data)):
             query.exec(
-                f"""INSERT INTO timeSheet (start, end, duration)
-                VALUES ('{startDate}','{endDate}', '{duration}')"""
+                f"""INSERT INTO timeSheet (start, end, duration, project_id)
+                VALUES ('{startDate}','{endDate}', '{duration}', {self.projectId})"""
             )
             query.finish()
         else:
@@ -96,5 +114,31 @@ class TimeSheetDb:
                 f"""UPDATE timeSheet SET start = '{startDate}', end = '{endDate}', duration = '{duration}' WHERE id = {data[0][0]}"""
             )
             query.finish()
+    
+    def getProjects(self):
+        query = QSqlQuery()
+        query.exec(f"SELECT id, name FROM projects")
+        id, name = range(2)
+        data = []
+        while query.next():
+            data.append((query.value(id), query.value(name)))
+        query.finish()
+        self.projectId = data[0][0]
+        return data
+
+    def setProjectIdByName(self, name:str):
+        query = QSqlQuery()
+        query.exec(f"SELECT id FROM projects WHERE name = '{name}'")
+        query.next()
+        self.projectId = query.value(0)
+        query.finish()
+    
+    def createProject(self, name:str):
+        query = QSqlQuery()
+        query.exec(
+                f"""INSERT INTO projects (name)
+                VALUES ('{name}')"""
+            )
+        query.finish()
         
             
