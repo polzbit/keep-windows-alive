@@ -1,20 +1,21 @@
-from PyQt5.QtWidgets import qApp, QWidget, QMainWindow, QStyle, QLabel, QCheckBox, QVBoxLayout, QHBoxLayout, QSystemTrayIcon, QAction, QMenu, QPushButton, QComboBox, QLineEdit, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import qApp, QWidget, QMainWindow, QStyle, QLabel, QVBoxLayout, QHBoxLayout, QSystemTrayIcon, QAction, QMenu, QPushButton, QComboBox, QLineEdit
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
-from PyQt5.QtGui import QIcon, QColor
+from PyQt5.QtGui import QIcon
 from KeepAlive.core import KeepAliveThread, GetPublicIpThread
 from KeepAlive.style.palette import palette
-from KeepAlive.core.calendar import get_current_days, is_weekday, get_month_list, get_runtime_seconds, get_runtime_text
-from KeepAlive.widgets.TableWidget import TableWidget
+from KeepAlive.core.calendar import  get_month_list, get_runtime_seconds
 from KeepAlive.widgets.SwitchWidget import SwitchWidget
+from KeepAlive.widgets.MonthSelect import MonthSelect
+from KeepAlive.widgets.YearSelect import YearSelect
+from KeepAlive.widgets.TimeSheetTable import TimeSheetTable
 import pandas as pd
 from KeepAlive.core.db import TimeSheetDb
-from .NewProjectWindow import NewProjectWindow
+from KeepAlive.windows.NewProjectWindow import NewProjectWindow
+from datetime import datetime
 
 class MainWindow(QMainWindow):
     createNewProject = pyqtSignal(str)
     closeNewProjectWindow = pyqtSignal()
-    table_headers = ['Date', 'Start', 'End', 'Duration', '']
-    disabled_columns = [0, 3, 4]
     month_list = get_month_list()
     def __init__(self):
         QMainWindow.__init__(self)
@@ -27,7 +28,6 @@ class MainWindow(QMainWindow):
         self.timeSheet = self.db.getTimeSheet()
         self.keepAliveProcess = None
         self.time = 0
-        self.calendarData = (0, 0, '', 0)
         self.projectList = self.db.getProjects()
         self.newProjectWindow = None
         self.setWindowIcon(self.icon)
@@ -110,21 +110,19 @@ class MainWindow(QMainWindow):
             self.projectSelect.addItem(project[1])
         self.projectSelect.currentTextChanged.connect(self.set_current_project)
 
-        self.yearSelect = QComboBox() 
+        self.yearSelect = YearSelect() 
         
-        self.monthSelect = QComboBox()      
+        self.monthSelect = MonthSelect(self.month_list)      
 
-        self.yearSelect.currentTextChanged.connect(self.set_timeSheet_year)
-        self.monthSelect.currentTextChanged.connect(self.set_timeSheet_month)
+        self.yearSelect.yearChange.connect(self.set_timeSheet_year)
+        self.monthSelect.monthChange.connect(self.set_timeSheet_month)
 
-        self.time_table = TableWidget(self.table_headers)
+        self.time_table = TimeSheetTable()
+        self.time_table.onUpdateCell.connect(self.on_table_cell_change)
+        self.time_table.onRuntimeChange.connect(self.on_runtime_change)
         if not len(self.projectList):
             self.time_table.hide()
         
-        header = self.time_table.horizontalHeader()       
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
         self.render_table() 
 
         self.statusBar().showMessage('')
@@ -195,8 +193,7 @@ class MainWindow(QMainWindow):
         if newYear:
             self.render_table(pd.to_datetime(f"{newYear}/{monthNumber}/1"))
 
-    def set_timeSheet_month(self, newMonth):
-        monthNumber = self.month_list.index(newMonth) + 1
+    def set_timeSheet_month(self, monthNumber):
         self.render_table(pd.to_datetime(f"{self.yearSelect.currentText()}/{monthNumber}/1"))
     
     def on_should_keep_alive_change(self):
@@ -208,109 +205,22 @@ class MainWindow(QMainWindow):
             self.keepAliveProcess.run()
             self.statusBar().showMessage('Keep-Alive is now running.')
 
-    def on_table_cell_change(self, item):
-        itemText = item.text()
-        time = itemText.split(':')
-        if len(time) == 3:
-            itemRow = item.row()
-            itemColumn = item.column()
-            date = self.time_table.item(itemRow, 0).text()
-            startTime = self.time_table.item(itemRow, 1).text()
-            endTime = self.time_table.item(itemRow, 2).text()
-            duration = self.time_table.item(itemRow, 3).text()
-            if itemColumn == 1:
-                startTime = itemText
-            elif itemColumn == 2:
-                endTime = itemText
-            self.db.updateTimestamp(date, startTime, endTime, duration)
-            self.render_table()
+    def on_table_cell_change(self, date, startTime, endTime, duration):
+        self.db.updateTimestamp(date, startTime, endTime, duration)
+        self.render_table()
 
-    def on_calculate_duration(self):
-        items = self.time_table.selectedItems()
-        if(len(items) == 2):
-            startTime = items[0].text()
-            endTime = items[1].text()
-            duration = get_runtime_seconds(endTime) - get_runtime_seconds(startTime)
-            duration_text = get_runtime_text(duration)
-            date = self.time_table.item(items[0].row(), 0).text()
-            self.db.updateTimestamp(date, startTime, endTime, duration_text)
-            self.render_table()
+    def on_runtime_change(self, runtime):
+        self.runtime =runtime
+        self.time_label.setText(runtime)
+        self.time = get_runtime_seconds(runtime)
 
-    def render_table(self, date = None):
+    def render_table(self, date = datetime.now()):
         if not self.db.isConnectionOpen():
             return
-        if date != None:
-            self.timeSheet = self.db.getTimeSheet(date)
-            self.calendarData = get_current_days(date)
-            (yearNumber, monthNumber, monthName, numOfDays, day) = self.calendarData
-        else:
-            self.timeSheet = self.db.getTimeSheet()
-            self.calendarData = get_current_days()
-            (yearNumber, monthNumber, monthName, numOfDays, day) = self.calendarData
-            def mapYears(variable):
-                date = pd.to_datetime(variable[1])
-                return date.year
-            yearList = []
-            def filterYears(variable):
-                date = pd.to_datetime(variable)
-                if date.year not in yearList:
-                    yearList.append(date.year)
-                    return True
-                return False
-
-            filteredYearList = list(filter(filterYears, list(map(mapYears ,self.timeSheet))))
-            if(not len(filteredYearList)):
-                filteredYearList = [yearNumber]
-
-            self.yearSelect.currentTextChanged.disconnect(self.set_timeSheet_year)
-            self.monthSelect.currentTextChanged.disconnect(self.set_timeSheet_month)
-            self.yearSelect.clear()
-            self.yearSelect.addItem(str(filteredYearList[0] - 1))
-            for year in filteredYearList:
-                self.yearSelect.addItem(str(year))
-            self.yearSelect.addItem(str(filteredYearList[-1] + 1))
-            self.yearSelect.setCurrentText(str(yearNumber)) 
-
-            self.monthSelect.clear()
-            for month in self.month_list:
-                self.monthSelect.addItem(month)
-            self.monthSelect.setCurrentText(monthName) 
-
-            self.yearSelect.currentTextChanged.connect(self.set_timeSheet_year)
-            self.monthSelect.currentTextChanged.connect(self.set_timeSheet_month)
-        receiversCount = self.time_table.receivers(self.time_table.itemChanged) 
-        if receiversCount > 0:     
-            self.time_table.itemChanged.disconnect(self.on_table_cell_change)
-        self.time_table._clear()
-        self.time_table.setRowCount(numOfDays)  
-        for i in range(len(self.table_headers)):
-            self.time_table.setHorizontalHeaderItem(i, QTableWidgetItem(self.table_headers[i]))
-        for row in range(numOfDays):
-            (dayName, is_week_day, data) = is_weekday(f"{row+1}/{monthNumber}/{yearNumber}", self.timeSheet)
-            for column in range(len(self.table_headers)):
-                item =  QTableWidgetItem(f"")
-                if column == 0: 
-                    item = QTableWidgetItem(f"{row + 1}/{monthNumber}/{yearNumber} {dayName}")
-                if data != None:
-                    if row + 1 == day:
-                        self.runtime = data[3]
-                        self.time_label.setText(self.runtime)
-                        if data[3] != '':
-                            self.time = get_runtime_seconds(data[3])
-                    if column == 1 or column == 2 or column == 3:
-                        item =  QTableWidgetItem(f"{data[column]}")
-                if(not is_week_day):
-                    item.setBackground(QColor('#707070'))
-                if column in self.disabled_columns:
-                    item.setFlags(Qt.ItemIsEnabled)
-                if column == 4 and data != None and data[1] != '' and data[2] != '':
-                    btn = QPushButton()
-                    btn.setText('Calculate')
-                    btn.clicked.connect(self.on_calculate_duration)
-                    self.time_table.setCellWidget(row, column, btn)
-                else:
-                    self.time_table.setItem(row, column, item) 
-        self.time_table.itemChanged.connect(self.on_table_cell_change)
+        self.timeSheet = self.db.getTimeSheet(date)
+        self.yearSelect.load_data(self.timeSheet, date)
+        self.monthSelect.load_data(date)
+        self.time_table.load_data(self.timeSheet, date)
 
     def init_systemTray(self):
         self.tray_icon = QSystemTrayIcon(self)

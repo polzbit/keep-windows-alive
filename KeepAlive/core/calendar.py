@@ -41,3 +41,7 @@ def get_runtime_text(runtime_seconds):
     min = sec // 60
     sec %= 60
     return "%02d:%02d:%02d" % (hour, min, sec)
+
+def mapYears(variable):
+    date = pd.to_datetime(variable[1])
+    return date.year
