@@ -9,26 +9,32 @@ from KeepAlive.widgets.MonthSelect import MonthSelect
 from KeepAlive.widgets.YearSelect import YearSelect
 from KeepAlive.widgets.TimeSheetTable import TimeSheetTable
 import pandas as pd
-from KeepAlive.core.db import TimeSheetDb
+from KeepAlive.core.db.time_sheet_model import TimeSheet
+from KeepAlive.core.db.projects_model import Projects
 from KeepAlive.windows.NewProjectWindow import NewProjectWindow
 from datetime import datetime
+from PyQt5.QtSql import QSqlDatabase
+from sys import exit as sysExit
 
 class MainWindow(QMainWindow):
     createNewProject = pyqtSignal(str)
     closeNewProjectWindow = pyqtSignal()
     month_list = get_month_list()
-    def __init__(self):
+    def __init__(self, con: QSqlDatabase):
         QMainWindow.__init__(self)
         self.createNewProject.connect(self.on_create_project)
         self.closeNewProjectWindow.connect(self.close_new_project_window)
-        self.db = TimeSheetDb()
+        self.con = con
+        self.time_sheet_model = TimeSheet()
+        self.projects_model = Projects()
         self.start_text = 'Start'
         self.runtime = '00:00:00'
         self.icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
-        self.timeSheet = self.db.getTimeSheet()
         self.keepAliveProcess = None
         self.time = 0
-        self.projectList = self.db.getProjects()
+        self.projectList = self.projects_model.getProjects()
+        self.projectId = self.projectList[0][0]
+        self.timeSheet = self.time_sheet_model.getTimeSheet(self.projectId)
         self.newProjectWindow = None
         self.setWindowIcon(self.icon)
         self.init_systemTray()
@@ -38,7 +44,7 @@ class MainWindow(QMainWindow):
         self.ipThread.run()
     
     def createTimestamp(self, end = False):
-        self.db.createTimestamp(self.runtime, end)
+        self.time_sheet_model.createTimestamp(self.projectId, self.runtime, end)
         self.render_table()
 
     def initUI(self):
@@ -181,7 +187,7 @@ class MainWindow(QMainWindow):
         self.newProjectWindow = None
 
     def set_current_project(self, project):
-        self.db.setProjectIdByName(project)
+        self.projectId = self.projects_model.getProjectIdByName(project)
         self.time = 0
         self.time_label.setText('00:00:00')
         self.render_table()
@@ -206,7 +212,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage('Keep-Alive is now running.')
 
     def on_table_cell_change(self, date, startTime, endTime, duration):
-        self.db.updateTimestamp(date, startTime, endTime, duration)
+        self.time_sheet_model.updateTimestamp(date, self.projectId, startTime, endTime, duration)
         self.render_table()
 
     def on_runtime_change(self, runtime):
@@ -214,10 +220,10 @@ class MainWindow(QMainWindow):
         self.time_label.setText(runtime)
         self.time = get_runtime_seconds(runtime)
 
-    def render_table(self, date = datetime.now()):
-        if not self.db.isConnectionOpen():
+    def render_table(self, date = pd.to_datetime(datetime.now())):
+        if not self.con.open():
             return
-        self.timeSheet = self.db.getTimeSheet(date)
+        self.timeSheet = self.time_sheet_model.getTimeSheet(self.projectId, date)
         self.yearSelect.load_data(self.timeSheet, date)
         self.monthSelect.load_data(date)
         self.time_table.load_data(self.timeSheet, date)
@@ -270,10 +276,10 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def on_create_project(self, projectName):
-        self.db.createProject(projectName)
+        self.projects_model.createProject(projectName)
         self.projectSelect.addItem(projectName)
         if not len(self.projectList):
-            self.db.setProjectIdByName(projectName)
+            self.projectId = self.projects_model.getProjectIdByName(projectName)
             self.render_table()
             self.time_table.show()
         self.close_new_project_window()
@@ -302,7 +308,11 @@ class MainWindow(QMainWindow):
         if self.ipThread != None and self.ipThread.is_alive():
             self.ipThread.stop()
         qApp.quit()
-        self.db.closeConnection()  
+        self.con.close()
+        del self.con
+        self.con = None
+        QSqlDatabase.removeDatabase("QSQLITE")
+        sysExit(0)
 
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
