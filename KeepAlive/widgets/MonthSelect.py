@@ -12,7 +12,8 @@ class MonthSelect(QComboBox):
         self.load_data()
     
     def load_data(self, date = datetime.now()):
-        (yearNumber, monthNumber, monthName, numOfDays, day) = get_current_days(date)
+        currentDate = pd.to_datetime(date)
+        monthName = currentDate.month_name()
         receiversCount = self.receivers(self.currentTextChanged) 
         if receiversCount > 0:     
             self.currentTextChanged.disconnect(self.on_change)

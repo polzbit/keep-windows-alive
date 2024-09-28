@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import qApp, QWidget, QMainWindow, QStyle, QLabel, QVBoxLayout, QHBoxLayout, QSystemTrayIcon, QAction, QMenu, QPushButton, QComboBox, QLineEdit
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
+from PyQt5.QtWidgets import qApp, QWidget, QTabWidget, QMainWindow, QStyle, QLabel, QVBoxLayout, QHBoxLayout, QSystemTrayIcon, QAction, QMenu, QPushButton, QComboBox, QLineEdit
+from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QIcon
 from KeepAlive.core import KeepAliveThread, GetPublicIpThread
 from KeepAlive.style.palette import palette
@@ -7,9 +7,11 @@ from KeepAlive.core.calendar import  get_month_list, get_runtime_seconds
 from KeepAlive.widgets.SwitchWidget import SwitchWidget
 from KeepAlive.widgets.MonthSelect import MonthSelect
 from KeepAlive.widgets.YearSelect import YearSelect
-from KeepAlive.widgets.TimeSheetTable import TimeSheetTable
+from KeepAlive.widgets.TasksTab import TasksTab
+from KeepAlive.widgets.TimeSheetTab import TimeSheetTab
 import pandas as pd
 from KeepAlive.core.db.time_sheet_model import TimeSheet
+from KeepAlive.core.db.tasks_model import Tasks
 from KeepAlive.core.db.projects_model import Projects
 from KeepAlive.windows.NewProjectWindow import NewProjectWindow
 from datetime import datetime
@@ -27,14 +29,14 @@ class MainWindow(QMainWindow):
         self.con = con
         self.time_sheet_model = TimeSheet()
         self.projects_model = Projects()
-        self.start_text = 'Start'
-        self.runtime = '00:00:00'
+        self.tasks_model = Tasks()
         self.icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
         self.keepAliveProcess = None
-        self.time = 0
+        self.tabIndex = 0
         self.projectList = self.projects_model.getProjects()
         self.projectId = self.projectList[0][0]
         self.timeSheet = self.time_sheet_model.getTimeSheet(self.projectId)
+        self.tasks = self.tasks_model.getTasks(self.projectId)
         self.newProjectWindow = None
         self.setWindowIcon(self.icon)
         self.init_systemTray()
@@ -44,7 +46,7 @@ class MainWindow(QMainWindow):
         self.ipThread.run()
     
     def createTimestamp(self, end = False):
-        self.time_sheet_model.createTimestamp(self.projectId, self.runtime, end)
+        self.time_sheet_model.createTimestamp(self.projectId, self.time_sheet_tab.runtime, end)
         self.render_table()
 
     def initUI(self):
@@ -68,6 +70,7 @@ class MainWindow(QMainWindow):
         self.public_ip_label.setMinimumSize(150, 30)
         self.public_ip_label.setMaximumSize(150, 30)
         self.public_ip_label.setContentsMargins(0, 0, 0, 0)
+        self.public_ip_label.setReadOnly(True)
 
         refresh_button = QPushButton()
         refresh_button.setMinimumSize(30, 30)
@@ -75,23 +78,6 @@ class MainWindow(QMainWindow):
         refresh_button.setContentsMargins(0, 0, 0, 0)
         refresh_button.clicked.connect(self.refreshPublicIp)
         refresh_button.setIcon(QIcon('.\\KeepAlive\\style\\icons\\refresh.png'))
-
-        self.start_button = QPushButton()
-        self.start_button.setMinimumSize(60, 40)
-        self.start_button.setMaximumSize(60, 40)
-        self.start_button.setContentsMargins(0, 0, 0, 0)
-        self.start_button.clicked.connect(self.toggleKeepAliveProcess)
-        self.start_button.setText('Start')
-
-        quit_button = QPushButton()
-        quit_button.setMinimumSize(60, 40)
-        quit_button.setMaximumSize(60, 40)
-        quit_button.setContentsMargins(0, 0, 0, 0)
-        quit_button.clicked.connect(self.quitEvent)
-        quit_button.setText('Exit')
-        
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.showTime)
 
         keep_alive_label = QLabel()
         keep_alive_label.setText("Keep windows active")
@@ -102,14 +88,6 @@ class MainWindow(QMainWindow):
 
         self.keep_alive_button = SwitchWidget()
         self.keep_alive_button.click.connect(self.on_should_keep_alive_change)
-        
-        self.time_label = QLabel()
-        self.time_label.setText(self.runtime)
-        self.time_label.setAlignment(Qt.AlignCenter)
-        self.time_label.setMinimumSize(60, 20)
-        self.time_label.setMaximumSize(60, 20)
-        self.time_label.setWordWrap(True)
-        self.time_label.setContentsMargins(5, 5, 5, 5)
 
         self.projectSelect = QComboBox() 
         for project in self.projectList:
@@ -123,43 +101,46 @@ class MainWindow(QMainWindow):
         self.yearSelect.yearChange.connect(self.set_timeSheet_year)
         self.monthSelect.monthChange.connect(self.set_timeSheet_month)
 
-        self.time_table = TimeSheetTable()
-        self.time_table.onUpdateCell.connect(self.on_table_cell_change)
-        self.time_table.onRuntimeChange.connect(self.on_runtime_change)
-        if not len(self.projectList):
-            self.time_table.hide()
-        
-        self.render_table() 
-
         self.statusBar().showMessage('')
+        
+        # Initialize tab screen
+        self.tabs = QTabWidget()
+        self.time_sheet_tab = TimeSheetTab()
+        self.tasks_tab = TasksTab() 
+
+        self.time_sheet_tab.onUpdateCell.connect(self.on_table_cell_change)
+        self.time_sheet_tab.onStartChange.connect(self.on_start_change)
+
+        self.tasks_tab.onUpdateCell.connect(self.on_task_cell_change)
+        self.tasks_tab.onDelete.connect(self.on_task_delete)
+
+        self.tabs.addTab(self.time_sheet_tab, "Time Sheet")
+        self.tabs.addTab(self.tasks_tab, "Tasks")
+        self.tabs.currentChanged.connect(self.on_tab_change)
+
+        if not len(self.projectList):
+            self.time_sheet_tab.time_table.hide()
 
         layout = QVBoxLayout()
         top_layout = QHBoxLayout()
         top_layout.addWidget(ip_text_label)
         top_layout.addWidget(self.public_ip_label)
         top_layout.addWidget(refresh_button)
-        controls_layout = QHBoxLayout()
-        controls_layout.addWidget(self.start_button)
-        controls_layout.addWidget(self.time_label)
-        controls_layout.addWidget(quit_button)
         ka_controls_layout = QHBoxLayout()
         ka_controls_layout.addWidget(keep_alive_label)
         ka_controls_layout.addWidget(self.keep_alive_button)
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setAlignment(Qt.AlignLeft)
         table_controls_layout = QHBoxLayout()
         table_controls_layout.addWidget(self.projectSelect)
         table_controls_layout.addWidget(self.yearSelect)
         table_controls_layout.addWidget(self.monthSelect)
         layout.addLayout(top_layout)
-        layout.addLayout(controls_layout)
         layout.addLayout(ka_controls_layout)
-        layout.addLayout(bottom_layout)
         layout.addLayout(table_controls_layout)
-        layout.addWidget(self.time_table)
+        layout.addWidget(self.tabs)
         self.central_widget.setLayout(layout)
         self._createActions()
         self._createMenuBar()
+        self.render_table()
         self.show()
 
     def _createMenuBar(self):
@@ -188,19 +169,51 @@ class MainWindow(QMainWindow):
 
     def set_current_project(self, project):
         self.projectId = self.projects_model.getProjectIdByName(project)
-        self.time = 0
-        self.time_label.setText('00:00:00')
-        self.render_table()
+        if not self.tabIndex:
+            self.time_sheet_tab.time = 0
+            self.time_sheet_tab.time_label.setText('00:00:00')
+            self.render_table()
+        else:
+            self.render_tasks_table()
 
     def set_timeSheet_year(self, newYear):
         monthNumber = self.month_list.index(self.monthSelect.currentText()) + 1
         if monthNumber > 12:
             monthNumber = 1
         if newYear:
-            self.render_table(pd.to_datetime(f"{newYear}/{monthNumber}/1"))
+            date = pd.to_datetime(f"{newYear}/{monthNumber}/1")
+            if not self.tabIndex:
+                self.render_table(date)
+            else:
+                self.render_tasks_table(date)
+
+    def on_task_delete(self, index):
+        taskId =  None
+        for i in range(len(self.tasks)):
+            if i == index:
+                taskId = self.tasks[index][0]
+                break
+        if taskId:
+            self.tasks_model.delete([('id', taskId)])
+            self.render_tasks_table()
+
+    def on_tab_change(self, index):
+        monthNumber = self.month_list.index(self.monthSelect.currentText()) + 1
+        if monthNumber > 12:
+            monthNumber = 1
+        currentDate = pd.to_datetime(f"{self.yearSelect.currentText()}/{monthNumber}/1")
+        self.tabIndex = index
+        if not index:
+            self.render_table(currentDate)
+        else:
+            self.render_tasks_table(currentDate)
 
     def set_timeSheet_month(self, monthNumber):
-        self.render_table(pd.to_datetime(f"{self.yearSelect.currentText()}/{monthNumber}/1"))
+        date = pd.to_datetime(f"{self.yearSelect.currentText()}/{monthNumber}/1")
+        if not self.tabIndex:
+            self.render_table(date)
+        else:
+            self.render_tasks_table(date)
     
     def on_should_keep_alive_change(self):
         if self.keepAliveProcess != None and self.keepAliveProcess.is_alive():
@@ -214,11 +227,39 @@ class MainWindow(QMainWindow):
     def on_table_cell_change(self, date, startTime, endTime, duration):
         self.time_sheet_model.updateTimestamp(date, self.projectId, startTime, endTime, duration)
         self.render_table()
+    
+    def on_task_cell_change(self, taskIndex:int, date:str, title:str, duration:str):
+        taskId =  None
+        for i in range(len(self.tasks)):
+            if i == taskIndex:
+                taskId = self.tasks[taskIndex][0]
+                break
+        
+        if not duration and not duration.isnumeric():
+            duration = ''
+        start =  pd.to_datetime(datetime.now())
+        if not date:
+            try:
+                currentDate = pd.to_datetime(date, dayfirst=True)
+                start = pd.to_datetime(f"{currentDate.year}/{currentDate.month}/{currentDate.day}")
+            except ValueError:
+                pass
+        self.tasks_model.updateTask(self.projectId, taskId, start, title, duration)
+        self.render_tasks_table()
+    
+    def on_start_change(self, isStarting):
+        if isStarting:
+            self.createTimestamp(True)
+        else:
+            self.createTimestamp()
 
-    def on_runtime_change(self, runtime):
-        self.runtime =runtime
-        self.time_label.setText(runtime)
-        self.time = get_runtime_seconds(runtime)
+    def render_tasks_table(self, date = pd.to_datetime(datetime.now())):
+        if not self.con.open():
+            return
+        self.tasks = self.tasks_model.getTasks(self.projectId, date)
+        self.yearSelect.load_data(self.tasks, date)
+        self.monthSelect.load_data(date)
+        self.tasks_tab.tasks_table.load_data(self.tasks)
 
     def render_table(self, date = pd.to_datetime(datetime.now())):
         if not self.con.open():
@@ -226,22 +267,19 @@ class MainWindow(QMainWindow):
         self.timeSheet = self.time_sheet_model.getTimeSheet(self.projectId, date)
         self.yearSelect.load_data(self.timeSheet, date)
         self.monthSelect.load_data(date)
-        self.time_table.load_data(self.timeSheet, date)
+        self.time_sheet_tab.time_table.load_data(self.timeSheet, date)
 
     def init_systemTray(self):
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(self.icon)
 
         show_action = QAction("Open...", self)
-        self.start_action = QAction("Start", self)
         quit_action = QAction("Exit", self)
         show_action.triggered.connect(self.show) 
-        self.start_action.triggered.connect(self.toggleKeepAliveProcess) 
         quit_action.triggered.connect(self.quitEvent)
 
         tray_menu = QMenu()
         tray_menu.addAction(show_action)
-        tray_menu.addAction(self.start_action)
         tray_menu.addAction(quit_action)
         self.tray_icon.setContextMenu(tray_menu)
 
@@ -257,19 +295,6 @@ class MainWindow(QMainWindow):
         event.ignore()
         self.hide()
 
-    def toggleKeepAliveProcess(self):
-        if self.start_button.text() == 'Stop':
-            self.time_label.setText(self.runtime)
-            self.start_button.setText('Start')
-            self.start_action.setText('Start')
-            self.createTimestamp(True)
-            self.timer.stop()
-        else:
-            self.start_button.setText('Stop')
-            self.start_action.setText('Stop')
-            self.createTimestamp()
-            self.timer.start(1000)
-
     @pyqtSlot(str)
     def showIp(self, ip):
         self.public_ip_label.setText(ip)
@@ -281,7 +306,7 @@ class MainWindow(QMainWindow):
         if not len(self.projectList):
             self.projectId = self.projects_model.getProjectIdByName(projectName)
             self.render_table()
-            self.time_table.show()
+            self.time_sheet_tab.time_table.show()
         self.close_new_project_window()
 
     def refreshPublicIp(self):
@@ -291,19 +316,8 @@ class MainWindow(QMainWindow):
             self.ipThread.finished.connect(self.showIp)
             self.ipThread.run()
 
-    def showTime(self):
-        self.time += 1
-        sec = self.time
-        hour = sec // 3600
-        sec %= 3600
-        min = sec // 60
-        sec %= 60
-        self.runtime = "%02d:%02d:%02d" % (hour, min, sec)
-        self.time_label.setText(self.runtime)
-
     def quitEvent(self):
         if self.keepAliveProcess != None and self.keepAliveProcess.is_alive():
-            self.toggleKeepAliveProcess()
             self.keepAliveProcess.stop()
         if self.ipThread != None and self.ipThread.is_alive():
             self.ipThread.stop()

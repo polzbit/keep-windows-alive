@@ -9,7 +9,7 @@ class DBModel:
         query = QSqlQuery()
         table_keys = ''
         for (key, type) in self.model['keys']:
-            table_keys += f'{key}, {type},'
+            table_keys += f'{key} {type},'
         table_keys = table_keys[:-1]
         query.exec(
             f"""
@@ -98,7 +98,18 @@ class DBModel:
                 )
         query.finish()
 
-    def clear(self):
+    def delete(self, where: list[tuple[str,str|int]] = []):
         query = QSqlQuery()
-        query.exec(f'delete from {self.model["name"]}')
+        table_where = ''
+        for (key, value) in where:
+            key_type = type(value)
+            if key_type == int:
+                table_where += f"{key} = {value} AND "
+            else:
+                table_where += f"{key} = '{value}' AND "
+        table_where = table_where[:-4]
+        if len(where):
+            query.exec(f'delete from {self.model["name"]} WHERE {table_where}')
+        else:
+            query.exec(f'delete from {self.model["name"]}')
         query.finish()
